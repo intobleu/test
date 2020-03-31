@@ -1,4 +1,17 @@
-haha
-ddd
-4444
-555
+192.168.100.94	appo,beanstalk,mysql02(data)
+192.168.100.95	appo,beanstalk,mysql02(data)
+192.168.100.96	bkmonitor(influxdb-proxy),bkmonitor(transfer)
+192.168.100.97	bkmonitor(influxdb-proxy),bkmonitor(transfer)
+192.168.100.98	bkmonitor(monitor),mysql01(datahub),appt,nfs
+192.168.100.99	bkmonitor(monitor),mysql01(datahub)
+192.168.100.100	paas,cmdb,job,gse,redis,consul
+192.168.100.101	paas,cmdb,job,gse,redis,consul
+192.168.100.68	nginx,license,confd,fta,mysql
+192.168.100.67	nginx,license,confd,fta,mysql,consul
+192.168.100.102	mongodb,zk(config),es,kafka(config),etcd,redis_cluster
+192.168.100.103	mongodb,zk(config),es,kafka(config),etcd,redis_cluster
+192.168.100.104	mongodb,zk(config),es,kafka(config),etcd,redis_cluster
+192.168.100.105	influxdb,rabbitmq
+192.168.100.106	influxdb,rabbitmq
+192.168.100.107	bkdata(accessapi),bkdata(authapi),bkdata(bksql),bkdata(collectorhub),bkdata(databus),bkdata(databusapi),bkdata(datamanageapi),bkdata(datamanager),bkdata(dataqueryapi),bkdata(metaapi),bkdata(metadata),bkdata(storekitapi),mysql02(data)
+192.168.100.108	bkdata(accessapi),bkdata(authapi),bkdata(bksql),bkdata(collectorhub),bkdata(databus),bkdata(databusapi),bkdata(datamanageapi),bkdata(datamanager),bkdata(dataqueryapi),bkdata(metaapi),bkdata(metadata),bkdata(storekitapi),mysql02(data)
