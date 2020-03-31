@@ -1,0 +1,347 @@
+#!/bin/bash 
+# vim: filetype=sh
+
+# other files
+source ./blueking.cfg
+
+# const
+RUN_PATH=$(pwd)
+
+COMMANDS=(tree screen vim jq telnet zip unzip pidof pkill rsync gawk curl lsof tar sed iproute uuid psmisc wget)
+REQUIRED=(net-tools openssl-devel readline-devel libcurl-devel libxml2-devel glibc-devel zlib-devel iproute sysvinit-tools procps-ng bind-utils)
+
+
+# utils function
+
+u_color_print() {
+	out_color=$1
+	print_content=$2
+	case $out_color in
+		"red")
+			echo -e "\033[31m$print_content \033[0m" 
+			;;
+		"green")
+			echo -e "\033[32m$print_content \033[0m" 
+			;;
+		"yellow")
+			echo -e "\033[33m$print_content \033[0m" 
+			;;
+		"white")
+			echo -e "$print_content"
+			;;
+		*)
+			echo "Usage: u_color_print [red|green|yellow|white] msg."	
+			;;
+	esac
+}
+
+
+u_log_print() {
+	log_time=$(date +'%Y-%m-%d %H:%M:%S')
+	log_level=$1
+	log_msg=$2
+	case $log_level in
+		"INFO")
+			u_color_print white "$log_time|[$log_level]|$log_msg"
+			echo "$log_time|[$log_level]|$log_msg" >> ./autoConfig.log
+			;;
+		"ERR")
+			u_color_print red "$log_time|[$log_level]|$log_msg"
+			echo "$log_time|[$log_level]|$log_msg" >> ./autoConfig.log
+			;;
+		"WARN")
+			u_color_print yellow "$log_time|[$log_level]|$log_msg"
+			echo "$log_time|[$log_level]|$log_msg" >> ./autoConfig.log
+			;;
+		"DONE")
+			u_color_print green "$log_time|[$log_level]|$log_msg"
+			echo "$log_time|[$log_level]|$log_msg" >> ./autoConfig.log
+			;;
+		*)
+			u_color_print yellow "Usage: u_log_print [INFO|ERR] msg"
+			;;
+	esac
+}
+u_cmd_check() {
+	if [ $? -eq 0 ]
+	then
+		u_log_print DONE "$1 Done."
+	else
+		u_log_print ERR "$1 Faild."
+		exit 1
+	fi
+}
+u_check_run() {
+        [ ! -f ".run.step" ] &&  touch .run.step
+	run_function=$1
+	if grep "$*" .run.step >/dev/null;
+	then
+		u_log_print WARN "$@ has been runed... SKIP"
+	else
+		$run_function
+		echo $run_function >> .run.step
+	fi
+}
+# 
+u_unpack() {
+    packName=$1
+    unpack_path=$2
+    if [ ! -d $unpack_path ] 
+    then
+		u_log_print WARN "Directory:$unpack_path is not existed."
+		u_log_print WARN "Starting to create it."
+        mkdir $unpack_path 
+		u_cmd_check "Create directory:$unpack_path"
+		u_log_print INFO "Starting to unpacking $packName"
+        tar xf $packName -C $unpack_path
+		u_cmd_check "Unpacking:$packName"
+    else
+		u_log_print INFO "Starting to unpacking $packName"
+        tar xf $packName -C $unpack_path
+		u_cmd_check "Unpacking:$packName"
+    fi
+}
+# remote to run some command to all BLueking Servers
+u_remote_run() {
+	remote_cmd=$1
+	for i in ${SERVERS[@]};
+	do
+		_ip=`echo $i|awk -F ',' '{print $1}'`
+		u_log_print INFO "Run cmd:[$remote_cmd] for [$_ip]"
+		ssh $_ip "$remote_cmd" |tee -a ./autoConfig.log
+	done
+}
+
+# scp something to all Blueking Servers
+u_scp_pkgs() {
+	local _pkgs=$1
+	local _tgpath=$2
+	for i in ${SERVERS[@]};
+	do
+		_ip=`echo $i|awk -F ',' '{print $1}'`
+		u_log_print INFO "Scp Pkgs:[$_pkgs] for [$_ip]"
+		scp $_pkgs root@$_ip:$_tgpath
+	done
+}
+# control function
+
+# check the package 'expect' is installed or not
+# if not , will install it
+c_check_expect() {
+    tcl_queryResult=$(rpm -qa |grep -o tcl-devel)
+    expect_queryResult=$(rpm -qa |grep -o expect)
+    if [ "$tcl_queryResult" == "tcl-devel" ] 
+    then
+		u_log_print INFO "Package:'tcl' is already installed."
+    else
+		u_log_print WARN "Starting to install expect."
+		rpm -ivh $RUN_PATH/.tools/tcl-*.rpm
+		u_cmd_check "Install Package:tcl"
+    fi
+    if [ "$expect_queryResult" == "expect" ] 
+    then
+		u_log_print INFO "Package:'expect' is already installed."
+    else
+		u_log_print WARN "Package:'expect' is not installed."
+		rpm -ivh $RUN_PATH/.tools/expect-*.rpm
+		u_cmd_check "Install Package:expect"
+    fi
+}
+
+c_check_ssh_key_match_or_not(){
+	isa_com=$(ssh-keygen  -y -f /root/.ssh/id_rsa)
+	isa_pub_com=$(cat /root/.ssh/id_rsa.pub)
+	if [ "$isa_com" == "$isa_pub_com" ];
+	then 
+		u_log_print INFO "id_rsa and id_rsa.pub MATCH."
+	else
+		u_log_print WARN "id_rsa and id_rsa.pub NOT MATCH."
+		cp /root/.ssh/id_rsa.pub /root/.ssh/id_rsa.bak
+		echo $isa_com > /root/.ssh/id_rsa.pub
+	fi
+}
+
+# check the file  '~/.ssh/id_rsa.pub' is existed or not.
+# if not, will create it
+c_check_id_rsa_pub() {
+	if [ ! -d /root/.ssh ] 
+	then
+		u_log_print WARN "Directory:/root/.ssh is not existed."
+		u_log_print WARN "Starting to create it."
+		mkdir /root/.ssh
+		u_cmd_check "Create directory:/root/.ssh"
+	else
+		u_log_print INFO "Directory:/root/.ssh is existed."
+	fi
+	#
+	if [ ! -f /root/.ssh/id_rsa ] 
+	then
+		u_log_print WARN "id_rsa.pub is not existed."
+		u_log_print WARN "Starting to create it."
+		ssh-keygen -t rsa -f /root/.ssh/id_rsa -P '' &>/dev/null 
+		u_cmd_check "CMD:ssh-keygen"
+	fi	
+	c_check_ssh_key_match_or_not
+	cat /root/.ssh/id_rsa.pub >> /root/.ssh/authorized_keys
+
+}
+
+# set autossh
+s_set_autossh() {
+	#spawn ssh-copy-id -i /root/.ssh/id_rsa.pub root@$1 ;
+	expect -c "set timeout 10;
+				spawn scp /root/.ssh/id_rsa /root/.ssh/id_rsa.pub /root/.ssh/authorized_keys root@$1:/root/.ssh/ ;
+				expect {
+				*(yes/no)* {send yes\r;exp_continue;}
+				*password:* {send $2\r;exp_continue;}
+
+			}
+	";
+}
+
+# set ssh without password
+s_set_ssh_without_pwd() {
+	c_check_id_rsa_pub
+	for i in ${SERVERS[@]};
+	do
+		_ip=`echo $i|awk -F ',' '{print $1}'`
+		_password=`echo $i|awk -F ',' '{print $2}'`
+		u_log_print INFO "Starting to set ssh without password:$_ip"
+		s_set_autossh $_ip $_password &>/dev/null
+		u_cmd_check "Set ssh without password:$_ip"
+	done
+}
+
+# config to close selinux
+c_config_selinux() {
+	u_log_print INFO "Configurate: Set [selinux level]."
+	u_remote_run "setenforce 0"
+	u_remote_run "sed -i 's/^\(SELINUX\)=\(.*\)/\1=disabled/' /etc/sysconfig/selinux"
+	u_log_print WARN "The config file /etc/sysconfig/selinux is modified, but the best way is REBOOT YOUR SERVERS."
+}
+
+# config to close firewalld
+c_config_firewalld() {
+	u_log_print INFO "Service Stop:firewalld."
+	u_remote_run "systemctl stop firewalld"
+	u_log_print INFO "Service Disable:firewalld."
+	u_remote_run "systemctl disable firewalld"
+}
+
+c_config_networkmanager() {
+	u_log_print INFO "Service Stop:NetworkManager."
+	u_remote_run "systemctl stop NetworkManager"
+	u_log_print INFO "Service Disable:NetworkManager."
+	u_remote_run "systemctl disable NetworkManager"
+}
+
+c_config_umask() {
+	u_log_print INFO "Configurate: Set [umask] value."
+	u_remote_run "umask 0022"
+}
+
+c_install_dependences() {
+	#echo ${COMMANDS[@]}
+	u_log_print INFO "Install COMMANDS:`echo ${COMMANDS[@]}`"
+	u_remote_run "yum -y install `echo ${COMMANDS[@]}`"
+	u_log_print INFO "Install REQUIRED:`echo ${REQUIRED[@]}`"
+	u_remote_run "yum -y install `echo ${REQUIRED[@]}`"
+}
+
+s_set_localyum() {
+	u_log_print INFO "Configurate: Set local yum source."
+	u_scp_pkgs ./bkeeallyum.tar.gz /opt/
+	u_remote_run "tar xf /opt/bkeeallyum.tar.gz -C /opt/"
+	u_remote_run "[ ! -d /etc/yum.repos.d/repobak/ ] && mkdir /etc/yum.repos.d/repobak/"
+	u_remote_run "mv /etc/yum.repos.d/*.repo /etc/yum.repos.d/repobak/"
+	cat> localyum.repo <<'EOF'
+[localyum]
+name=localyum
+baseurl=file:///opt/newyum
+gpgcheck=0
+enabled=1
+EOF
+	u_scp_pkgs localyum.repo /etc/yum.repos.d/
+	rm -f localyum.repo
+	u_remote_run "yum clean all"
+	u_remote_run "yum repolist"
+	
+}
+
+c_config_open_file() {
+	u_log_print INFO "Configurate: Set [open files] value."
+	u_remote_run "echo '* soft nofile 102400' >> /etc/security/limits.conf"
+	u_remote_run "echo '* hard nofile 102400' >> /etc/security/limits.conf"
+	u_remote_run "source /etc/profile"
+}
+
+c_config_pip_pkgs() {
+    platfrom=$1
+    module=$2
+    u_log_print INFO "Configurate:Set pip pkgs: $platfrom - $module"
+    \cp -rf ./bkeepip/$module/* $BK_INSTALL_PATH/src/$platfrom/support-files/pkgs
+    u_cmd_check "Config Pip packages: $module"
+}
+
+c_config_bkdata_src() {
+        u_log_print INFO "Configurate:Set Open Source Component: [BKDATA]."
+	\cp -rf ./bkeepip/extrapkgs/bkdata/logback-core-1.1.7.jar ${BK_INSTALL_PATH}/src/bkdata/databus/lib/company/
+	\cp -rf ./bkeepip/extrapkgs/bkdata/mysql-connector-java-5.1.38.jar ${BK_INSTALL_PATH}/src/bkdata/databus/lib/company/
+	\cp -rf ./bkeepip/extrapkgs/bkdata/waffle-jna-1.7.5.jar ${BK_INSTALL_PATH}/src/bkdata/databus/lib/company/
+	\cp -rf ./bkeepip/extrapkgs/bkdata/xz-1.5.jar ${BK_INSTALL_PATH}/src/bkdata/databus/lib/company/
+	\cp -rf ./bkeepip/extrapkgs/bkdata/MySQL-python-1.2.5.zip ${BK_INSTALL_PATH}/src/bkdata/support-files/pkgs/
+	\cp -rf ./bkeepip/extrapkgs/bkdata/uwsgi-2.0.12.tar.gz ${BK_INSTALL_PATH}/src/bkdata/support-files/pkgs/
+    
+}
+c_config_zbx_src() {
+        u_log_print INFO "Configurate:Set Open Source Component: [ZABBIX]."
+	\cp -rf ./bkeepip/extrapkgs/zabbix/* ${BK_INSTALL_PATH}/src/zabbix/el7/
+}
+
+c_config_job_src() {
+        u_log_print INFO "Configurate:Set Open Source Component: [JOB]."
+	mkdir -p /data/src/job/job/WEB-INF/lib
+	\cp -rf ./bkeepip/extrapkgs/job/* /data/src/job/job/WEB-INF/lib
+	cd /data/src/job/job
+	zip -u0 job-exec.war WEB-INF/lib/*.jar
+	cd $RUN_PATH
+        #cd ./bkeepip
+        #bash ./start.sh
+}
+
+
+#certMac=$(openssl x509 -noout -text -in ${BK_INSTALL_PATH}/src/cert/gse_server.crt | grep -oP "(?<=email:).*?(?=,|$)")
+
+c_check_mac() {
+	echo -n "" > license.ip
+	certMac=`openssl x509 -noout -text -in ${BK_INSTALL_PATH}/src/cert/gse_server.crt |sed -n '/Subject Alternative Name:/{n;p}'| grep -oP '\b([a-z0-9]{2}:){5}[a-z0-9]{2}\b'`
+#	certMac=("${certMac[@]}" `openssl x509 -noout -text -in ${BK_INSTALL_PATH}/src/cert/gse_server.crt | grep -oP "(?<=email:).*?(?=,|$)"`)
+	for _ip in ${SERVERS[@]};
+	do
+		ip=`echo $_ip|awk -F ',' '{print $1}'`
+		deviceName=$(ssh root@$ip "ip a| grep $ip" | awk -F ' ' '{print $NF}')
+		macAddr=$(ssh root@$ip "cat /sys/class/net/$deviceName/address")
+		matchMac=$(echo $certMac |grep -oP "$macAddr")
+		if [ $matchMac ];
+		then
+			echo -n "$ip[$matchMac]" >> license.ip
+		fi
+		#if [ "$macAddr" = "${certMac[0]}" -o "$macAddr" = "${certMac[1]}" -o "$macAddr" = "${certMac[2]}" -o "$macAddr" = "${certMac[3]}" ];
+		#then
+		#	echo -n "$ip " >> license.ip
+		#	#u_color_print yellow "The LICENSE IP is [$ip]"
+		#fi
+	done
+	echo "" >> license.ip
+	licenseMac=$(cat license.ip 2>/dev/null)	
+	if [ "$licenseMac" = "" ];
+	then
+		u_log_print ERR "No Servers Match This Cert, Please Check Your Cert Files."
+		exit 1
+	else
+		u_log_print DONE "The LICENSE Server IP is $licenseMac"
+	
+	fi
+}
+
+
